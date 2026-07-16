@@ -17,7 +17,7 @@ let package = Package(
             targets: ["AmosTTS"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/wyk111wyk/AmosBase.git", .upToNextMajor(from: "1.0.0"))
+        .package(url: "https://github.com/wyk111wyk/AmosBase.git", branch: "main")
     ],
     targets: [
         .target(
