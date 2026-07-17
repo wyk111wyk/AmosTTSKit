@@ -180,22 +180,37 @@ extension TTSManager {
     }
     
     /// 保存为音频文件（不播放）
+    /// ⚠️ 已迁移：SimpleFileHelper → SimpleFile/SimpleFolder
     public func outputContents(
         for allContent: [TTSContent],
         config: TTSConfig? = nil,
         saveName: String
     ) async throws -> URL? {
         try await withCheckedThrowingContinuation { continuation in
-            let fileHelper = SimpleFileHelper()
+            // 新 API: 定位 audioFile 文件夹
+            guard let audioFolder = try? SimpleFolder.documents?
+                .createSubfolderIfNeeded(at: "audioFile") else {
+                let error = SimpleError.customError(
+                    title: "生成音频文件失败",
+                    msg: "无法定位音频文件夹"
+                )
+                continuation.resume(throwing: error)
+                return
+            }
             
-            guard !fileHelper.fileExists(saveName) else {
-                continuation.resume(returning: fileHelper.filePath(saveName))
+            let fileName = "\(saveName).mp3"
+            
+            // 新 API: 检查文件是否已存在
+            if audioFolder.containsFile(named: fileName),
+               let existingFile = try? audioFolder.file(named: fileName) {
+                continuation.resume(returning: existingFile.url)
                 return
             }
             
             guard let msTTS else {
-                let error = SimpleError.customError(title: "生成音频文件失败", msg: "音频引擎没有成功初始化")
-                continuation.resume(throwing: error)
+                continuation.resume(throwing: SimpleError.customError(
+                    title: "生成音频文件失败", msg: "音频引擎没有成功初始化"
+                ))
                 return
             }
             
@@ -207,22 +222,19 @@ extension TTSManager {
             ) { playStatus in
                 switch playStatus {
                 case .stop:
-                    let error = SimpleError.customError(title: "生成音频文件失败", msg: "请确保网络环境后重试")
-                    if let filePath = fileHelper.filePath(saveName, isCreateWhenEmpty: false) {
-                        if let data = try? Data(contentsOf: filePath), data.count > 0 {
-                            continuation.resume(returning: filePath)
-                        }else {
-                            fileHelper.deleteFile(filePath)
-                            continuation.resume(throwing: error)
-                        }
-                    }else {
-                        // 找不到音频文件地址
+                    let error = SimpleError.customError(
+                        title: "生成音频文件失败", msg: "请确保网络环境后重试"
+                    )
+                    // 新 API: 获取文件引用并检查内容
+                    if let file = try? audioFolder.file(named: fileName),
+                       let data = try? file.read(), data.count > 0 {
+                        continuation.resume(returning: file.url)
+                    } else {
+                        try? audioFolder.file(named: fileName).delete()
                         continuation.resume(throwing: error)
                     }
                 case .error(let error):
-                    if let filePath = fileHelper.filePath(saveName, isCreateWhenEmpty: false) {
-                        fileHelper.deleteFile(filePath)
-                    }
+                    try? audioFolder.file(named: fileName).delete()
                     continuation.resume(throwing: error)
                 default: break
                 }

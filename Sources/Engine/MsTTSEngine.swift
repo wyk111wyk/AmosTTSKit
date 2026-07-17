@@ -140,10 +140,11 @@ class MsTTSEngine {
             // 创建播放合成器
             var audioConfig: SPXAudioConfiguration
             if let audioFileName,
-               let fileUrl = SimpleFileHelper().filePath(audioFileName, suffix: "mp3") {
-                audioConfig = try SPXAudioConfiguration(wavFileOutput: fileUrl.path())
+               let audioFolder = try? SimpleFolder.documents?.createSubfolderIfNeeded(at: "audioFile"),
+               let file = try? audioFolder.createFileIfNeeded(withName: "\(audioFileName).mp3") {
+                audioConfig = try SPXAudioConfiguration(wavFileOutput: file.path)
                 if isDebuging {
-                    debugPrint("储存音频文件的地址:\(fileUrl)")
+                    debugPrint("储存音频文件的地址:\(file.url)")
                 }
             }else {
                 audioConfig = SPXAudioConfiguration()
