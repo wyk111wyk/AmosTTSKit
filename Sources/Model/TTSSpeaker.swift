@@ -1,6 +1,6 @@
 //
 //  TTSSpeaker.swift
-//  AmosVoice
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2023/4/5.
 //
@@ -12,16 +12,16 @@ import AmosBase
 public struct TTSSpeakerDic: Codable, Identifiable, Sendable {
     public let language: TTSLanguage
     public let speakers: [TTSSpeaker]
-    
-    public var id: UUID { UUID() }
-    public var isExpanded: Bool = true
-    
+
+    /// 使用 `language.rawValue` 作为稳定 id，避免每次访问生成新的 UUID 导致 SwiftUI 重建。
+    public var id: String { language.rawValue }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         language = try container.decode(TTSLanguage.self, forKey: .language)
         speakers = try container.decode([TTSSpeaker].self, forKey: .speakers)
     }
-    
+
     public static let fileName = "tts_speakers.json"
     public static let allLanguages: [TTSSpeakerDic] = fileName.getFileFromBundle(bundle: .module) ?? []
     public static let onlyMSLanguages: [TTSSpeakerDic] = (fileName.getFileFromBundle(bundle: .module) ?? []).filter { dic in

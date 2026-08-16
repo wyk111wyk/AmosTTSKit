@@ -1,6 +1,6 @@
 //
 //  ConfigSetting.swift
-//  AmosVoice
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2023/4/7.
 //
@@ -10,17 +10,19 @@ import AmosBase
 
 public struct ConfigSetting: View {
     @Environment(\.dismiss) private var dismissPage
-    
+
     @State var config: TTSConfig
-    let saveAvtion: (TTSConfig?) -> Void
-    
+    /// 旧字段名 `saveAvtion`（保留以避免破坏外部调用方），同时提供拼写正确的别名。
+    private let saveAction: (TTSConfig?) -> Void
+    var saveAvtion: (TTSConfig?) -> Void { saveAction }
+
     @State private var useDefaultConfig: Bool = false
     // 是否是设置默认发音人（或单独语音设置）
     let isDefaultSetting: Bool
-    
+
     @Bindable var ttsManager: TTSManager
     @State private var isShowLive = true
-    
+
     public init(
         ttsManager: TTSManager,
         config: TTSConfig,
@@ -29,8 +31,8 @@ public struct ConfigSetting: View {
     ) {
         self.ttsManager = ttsManager
         self._config = State(initialValue: config)
-        self.saveAvtion = saveAvtion
-        
+        self.saveAction = saveAvtion
+
         // 区分设置默认还是单独自定义
         if let useDefaultConfig {
             self._useDefaultConfig = State(initialValue: useDefaultConfig)
@@ -39,7 +41,7 @@ public struct ConfigSetting: View {
             isDefaultSetting = true
         }
     }
-    
+
     public var body: some View {
         Form {
             if !isDefaultSetting {
@@ -53,22 +55,22 @@ public struct ConfigSetting: View {
                 style()
                 role()
             }.disabled(useDefaultConfig)
-            
+
             speechTest()
         }
         .navigationTitle("播放属性")
         .buttonCircleNavi(role: .destructive, callback: savePage)
     }
-    
+
     private func savePage() {
         if !isDefaultSetting && useDefaultConfig {
-            saveAvtion(nil)
+            saveAction(nil)
         }else {
-            saveAvtion(config)
+            saveAction(config)
         }
         dismissPage()
     }
-    
+
     private func speaker() -> some View {
         NavigationLink {
             SpeakerPicker(
@@ -91,13 +93,13 @@ public struct ConfigSetting: View {
                         Text(config.speaker.speakerName)
                             .bold()
                             .foregroundStyle(.primary)
-                        Text(config.speaker.gender.name())
+                        Text(config.speaker.gender.displayName)
                             .simpleTag(
                                 .full(
                                     verticalPad: 1.5,
                                     horizontalPad: 5,
                                     cornerRadius: 3,
-                                    bgColor: config.speaker.gender.color()
+                                    bgColor: config.speaker.gender.color
                                 )
                             )
                     }
@@ -109,11 +111,11 @@ public struct ConfigSetting: View {
             }
         }
     }
-    
+
     @ViewBuilder
     private func rate() -> some View {
         let rateLevel = Binding<RateLevel> (
-            get: { RateLevel.level(config.rate) },
+            get: { RateLevel.from(rate: config.rate) },
             set: { config.rate = $0.rate }
         )
         VStack {
@@ -135,7 +137,7 @@ public struct ConfigSetting: View {
             }.pickerStyle(.segmented)
         }
     }
-    
+
     @ViewBuilder
     private func style() -> some View {
         if config.speaker.allStyles.count > 0 {
@@ -162,7 +164,7 @@ public struct ConfigSetting: View {
             }
         }
     }
-    
+
     @ViewBuilder
     private func role() -> some View {
         if config.speaker.allRoles.count > 0 {
@@ -189,7 +191,7 @@ public struct ConfigSetting: View {
             }
         }
     }
-    
+
     private func speechTest() -> some View {
         Section {
             ForEach(

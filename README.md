@@ -1,220 +1,204 @@
-# AmosTTS
-[![Supported Swift Version](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fargmaxinc%2FWhisperKit%2Fbadge%3Ftype%3Dswift-versions&labelColor=353a41&color=32d058)](https://www.amosstudio.com.cn/) 
+# AmosTTSKit
+[![Supported Swift Version](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fargmaxinc%2FWhisperKit%2Fbadge%3Ftype%3Dswift-versions&labelColor=353a41&color=32d058)](https://www.amosstudio.com.cn/)
 [![Supported Platforms](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fargmaxinc%2FWhisperKit%2Fbadge%3Ftype%3Dplatforms&labelColor=353a41&color=32d058)](https://www.amosstudio.com.cn/)
 [![Swift Package Manager](https://img.shields.io/badge/Swift_Package_Manager-compatible-orange?style=flat-square)](https://img.shields.io/badge/Swift_Package_Manager-compatible-orange?style=flat-square)
 
 作者 Amos 网址 [AmosStudio](https://www.amosstudio.com.cn/)。
 <img width="1030" height="211" alt="Logo-Black" src="https://github.com/user-attachments/assets/566ff915-d24e-4c37-9fb8-3a450e93d206" />
 
-
 # 主要功能
-这是一款基于Swift构建的语音合成（TTS）管理库，底层封装系统AVSpeechSynthesis框架，同时支持主流第三方TTS接口，提供统一、简洁的语音合成与播放控制能力。
-> 核心依赖：AVFoundation，兼容iOS 13+/macOS 10.15+
-1. 系统原生语音合成与自定义参数配置
-2. 多语音引擎/音色切换，支持中英文等多语种
-3. 语音合成播放控制（播放、暂停、停止、语速/音调调节）
-4. 合成语音本地保存为音频文件
-5. 批量文本合成与队列播放管理
+这是一款基于 Swift 构建的语音合成（TTS）管理库，统一封装系统 `AVSpeechSynthesizer` 与微软 Azure 认知服务语音 SDK，提供简洁、可控的语音合成与播放能力。
+
+> 核心依赖：AVFoundation、Microsoft Cognitive Services Speech；最低支持 **iOS 17 / macOS 14 / watchOS 10**。
+
+1. 系统 / 微软双引擎统一调度，底层切换对业务无感
+2. 多语音音色切换，支持中、英、日、韩、多语言
+3. 播放控制：播放、暂停、停止、语速 / 音调 / 音量调节
+4. 合成语音本地保存为 MP3（自动验证文件合法性、缓存复用）
+5. 词级实时高亮（兼容 LF / CRLF 换行）
 
 # 相关特性
-- 独立线程处理语音合成与播放，避免主线程阻塞
-~~~swift
-ttsQueue = DispatchQueue(label: "com.amosstudio.amostts.queue", attributes: [])
-~~~
-- 支持语音合成进度实时回调，适配UI展示
-- 统一封装系统/第三方TTS接口，底层切换无感知
-- 支持`AppGroup`共享语音配置，适配小组件语音播报
-- 内置语音合成错误处理与重试机制
+- **三态播放状态机**：`idle` / `playing` / `paused` / `preparing`，回调安全收敛，避免重复 resume
+- **线程安全**：所有可变状态由 `NSLock` 串行化或显式派发到主 actor；`@Observable` 字段统一在主 actor 上读写
+- **SwiftUI 原生**：基于 `@Observable` 与 `@Bindable`，可直接绑定到视图
+- **资源文件内置**：发音人 / 语气 / 角色数据通过 SwiftPM `Resources` 打包
 
 # 使用语音合成库
-## 初始化TTS管理器
-初始化核心管理类`TTSManager`，支持全局配置默认语音参数，指定合成引擎类型。
-~~~swift
-// 初始化系统原生TTS引擎，配置默认参数
-let ttsConfig = TTSConfig(
-    engine: .system, // 可选.system/.custom(第三方)
-    language: "zh-CN",
-    rate: 0.5, // 语速 0.0~1.0
-    pitch: 1.0, // 音调 0.5~2.0
-    volume: 1.0 // 音量 0.0~1.0
-)
-self.ttsManager = TTSManager(config: ttsConfig)
-// 监听合成/播放状态
-ttsManager.stateHandler = { state in
-    switch state {
-    case .synthesizing(let progress): print("合成中：\(progress*100)%")
-    case .playing: print("语音播放中")
-    case .paused: print("语音已暂停")
-    case .stopped: print("语音已停止")
-    case .completed: print("合成播放完成")
-    }
-}
-~~~
-
-## 核心功能使用示例
-### 基础文本语音合成与播放
+## 初始化 TTS 管理器
 ```swift
-/// 合成并播放单段文本
-func speakText(_ text: String) async {
-    do {
-        let ttsRequest = TTSRequest(text: text)
-        try await ttsManager.speak(ttsRequest)
-    } catch {
-        handleTTSError(error)
-    }
-}
+import AmosTTSKit
 
-/// 暂停/继续/停止播放
-func pauseSpeak() { ttsManager.pause() }
-func resumeSpeak() { ttsManager.resume() }
-func stopSpeak() { ttsManager.stop() }
+@State var ttsManager = TTSManager(isDebuging: false)
+
+// 监听播放状态
+withObservationTracking {
+    _ = ttsManager.playState
+} onChange: {
+    print("播放状态: \(ttsManager.playState)")
+}
 ```
 
-### 自定义语音参数合成
-支持为单条合成请求单独配置参数，覆盖全局默认设置。
+`TTSManager.playState` 是核心状态：
+- `.idle` 空闲
+- `.preparing` 微软 TTS 准备中
+- `.playing` 正在播放
+- `.paused` 已暂停（仅系统引擎支持真正暂停）
+
+## 播放文本
 ```swift
-/// 自定义音色、语速合成英文文本
-func speakEnglishWithCustomConfig() async {
+func speak(_ text: String) {
+    let content = TTSContent(speechText: text)
     do {
-        let customRequest = TTSRequest(
-            text: "Hello, AmosTTS is a lightweight TTS library for Swift.",
-            language: "en-US",
-            rate: 0.6,
-            pitch: 0.8,
-            voiceName: "Samantha" // 指定系统音色名称
+        try ttsManager.playContents(
+            engine: .system,            // 或 .ms
+            allContent: [content],
+            showLive: true              // 是否弹出 SpeechLiveView
         )
-        try await ttsManager.speak(customRequest)
     } catch {
-        handleTTSError(error)
+        print("播放失败：\(error)")
     }
 }
 ```
 
-### 合成语音并本地保存为音频文件
-将合成的语音保存为WAV/MP3格式，支持离线播放。
+## 暂停 / 继续 / 停止
 ```swift
-/// 合成文本并保存为本地音频文件
-func synthesizeAndSaveText(_ text: String) async -> URL? {
+ttsManager.pauseSpeech()   // 系统引擎调用 AVSpeechSynthesizer.pause；微软引擎通过 stop 模拟
+ttsManager.continueSpeech()// 恢复系统引擎；微软引擎重新播放
+ttsManager.stopSpeech()    // 强制停止并清理高亮
+```
+
+## 保存为 MP3
+```swift
+func synthesizeToFile(_ text: String) async {
     do {
-        let savePath = FileManager.default.temporaryDirectory.appendingPathComponent("tts_audio.wav")
-        let request = TTSRequest(text: text)
-        // 仅合成不播放，保存至指定路径
-        try await ttsManager.synthesize(request, saveTo: savePath, format: .wav)
-        return savePath
+        let url = try await ttsManager.outputContents(
+            for: [TTSContent(speechText: text)],
+            saveName: "demo"
+        )
+        print("已保存：\(url?.path ?? "未生成")")
     } catch {
-        handleTTSError(error)
-        return nil
+        print("保存失败：\(error)")
     }
 }
 ```
 
-### 批量文本队列合成与播放
-支持多段文本按顺序合成播放，支持插队、清空队列操作。
+- 文件落地到 `Documents/audioFile/<saveName>.mp3`
+- 已存在且合法的 MP3（ID3 / MPEG 同步头 + ≥1KB）会直接返回缓存
+- 命中但损坏的文件会被删除后重新合成
+
+## 自定义播放配置
 ```swift
-/// 批量添加文本至播放队列，按顺序合成播放
-func speakTextQueue(_ texts: [String]) async {
-    do {
-        let requests = texts.map { TTSRequest(text: $0) }
-        // 添加至队列并开始播放
-        try await ttsManager.addToQueue(requests, playImmediately: true)
-    } catch {
-        handleTTSError(error)
-    }
-}
-
-/// 清空播放队列并停止当前播放
-func clearSpeakQueue() {
-    ttsManager.clearQueue()
-    ttsManager.stop()
-}
+let config = TTSConfig(
+    speaker: .xiaomo,
+    style: TTSStyle(style: "gentle", title: "温柔", instruction: ""),
+    rate: 30,      // -50 ~ 200 百分比偏移
+    pitch: 0,      // -50 ~ 50  音调
+    volume: 100    // 0 ~ 100    音量
+)
 ```
 
-### 切换语音引擎/音色
-统一接口切换系统不同音色或第三方TTS引擎，无需修改业务代码。
+`TTSConfig` 字段：
+| 字段 | 范围 | 含义 |
+| --- | --- | --- |
+| `speaker` | — | 发音人（`TTSSpeaker.xiaoxiao` 等） |
+| `role` | 可选 | 角色 |
+| `style` | 可选 | 语气 |
+| `styledegree` | 0.01 ~ 2 | 语气强度，注入 SSML |
+| `rate` | -50 ~ 200 | 语速百分比偏移（系统引擎由 `wrappedRate` 二次映射） |
+| `pitch` | -50 ~ 50 | 音调百分比偏移 |
+| `volume` | 0 ~ 100 | 音量百分比 |
+
+系统引擎下的 `rate` 会被 `wrappedRate` 映射到 `AVSpeechUtterance.rate` 的 0 ~ 1 区间。
+
+## 切换默认发音人
 ```swift
-/// 切换系统音色
-func switchSystemVoice(_ voiceName: String) {
-    ttsManager.updateConfig { config in
-        config.voiceName = voiceName
-    }
-}
+ttsManager.saveDefaultConfig(
+    TTSConfig(speaker: .xiaoxiao, style: .poemStyle)
+)
 
-/// 切换至第三方TTS引擎（如讯飞/百度）
-func switchCustomTTSEngine() {
-    let customConfig = TTSConfig(
-        engine: .custom,
-        apiKey: "your_custom_tts_api_key", // 第三方接口密钥
-        language: "zh-CN",
-        rate: 0.5
-    )
-    ttsManager.reloadConfig(customConfig)
-}
+let current = ttsManager.defaultConfig
+print("当前默认发音人：\(current.speaker.speakerName)")
 ```
 
-## 支持的协议与自定义模型
-自定义TTS请求/引擎需遵循对应协议，便于扩展第三方TTS接口。
-### 自定义TTS引擎协议
+默认配置通过 `SimpleDefaults` 持久化（iCloud 同步），无需关心 `UserDefaults` key。
+
+## 高级：自定义 TTSContent
 ```swift
-/// 自定义TTS引擎需遵循此协议
-protocol TTSEngineProtocol {
-    func synthesize(_ request: TTSRequest) async throws -> Data
-    func speak(_ request: TTSRequest, progress: ((Double) -> Void)?) async throws
-    func stop()
-}
+let content = TTSContent(
+    type: .text,
+    speechText: "你好",
+    useDefaultConfig: false,            // 使用本段独立 config
+    config: .init(speaker: .xiaomo, rate: 50)
+)
 ```
-### 自定义语音请求模型
+
+段落可以插入停顿：
 ```swift
-/// 自定义TTS请求，遵循TTSRequestProtocol
-struct CustomTTSRequest: TTSRequestProtocol {
-    var text: String // 合成文本
-    var language: String // 语言标识
-    var rate: Double // 语速
-    var pitch: Double // 音调
-    var volume: Double // 音量
-    var customParams: [String: Any]? // 第三方引擎自定义参数
-}
+let segments: [TTSContent] = [
+    TTSContent(speechText: "第一段"),
+    TTSContent.pause(.medium),          // 750 ms 停顿
+    TTSContent(speechText: "第二段"),
+]
 ```
 
-## 错误处理
-库内封装统一的`TTSError`枚举，覆盖合成、播放、引擎配置等所有错误场景。
+## 监听播放进度（高亮）
 ```swift
-/// 全局TTS错误处理
-func handleTTSError(_ error: Error) {
-    guard let ttsError = error as? TTSError else {
-        print("TTS未知错误：\(error.localizedDescription)")
-        return
-    }
-    switch ttsError {
-    case .invalidText: print("错误：合成文本为空或无效")
-    case .unsupportedLanguage: print("错误：不支持当前语言类型")
-    case .engineInitFailed: print("错误：TTS引擎初始化失败")
-    case .synthesizeFailed: print("错误：语音合成失败")
-    case .saveFileFailed: print("错误：音频文件保存失败")
-    case .customEngineError(let msg): print("第三方引擎错误：\(msg)")
-    default: print("TTS错误：\(ttsError.localizedDescription)")
-    }
-}
+@Bindable var ttsManager: TTSManager
+
+SpeechLiveView(ttsManager: ttsManager)        // 完整高亮页
+SpeechLiveBar(ttsManager: ttsManager)        // 底部播放条
 ```
 
-## 监听TTS全局通知
-通过通知中心监听语音合成/播放的全局状态变化，适配跨页面UI更新。
-```swift
-import Combine
-var cancellables = Set<AnyCancellable>()
+内部通过 `HLContent.highlightedText()` 把 `textOffset / wordLength` 投射到原文，并兼容 LF / CRLF 换行（Microsoft 引擎会把换行折叠为 1 字符，已自动补偿）。
 
-// 监听语音合成完成通知
-NotificationCenter.default.publisher(for: .ttsSynthesizeCompleted)
-    .sink { _ in
-        print("全局通知：语音合成完成")
-        // 执行后续业务逻辑
-    }
-    .store(in: &cancellables)
+# 模型与枚举速查
 
-// 监听语音播放完成通知
-NotificationCenter.default.publisher(for: .ttsPlayCompleted)
-    .sink { notification in
-        guard let text = notification.userInfo?["text"] as? String else { return }
-        print("全局通知：文本\(text)播放完成")
-    }
-    .store(in: &cancellables)
+## `TTSEngine`
+- `.system` 系统 `AVSpeechSynthesizer`
+- `.ms` 微软 Azure 认知服务
+
+## `PlayState`
+四态枚举：`idle` / `preparing` / `playing` / `paused`，比旧版 `Bool?` 更明确。
+
+`TTSManager.isPlaying` 仍以 `Bool?` 兼容旧调用：
+- `true` ⇒ `.playing`
+- `nil` ⇒ `.preparing`
+- `false` ⇒ `.idle` 或 `.paused`
+
+## `BreakLevel`
+| 值 | 名称 | 毫秒 |
+| --- | --- | --- |
+| `.x_weak` | 极弱停顿 | 250 |
+| `.weak` | 弱停顿 | 500 |
+| `.medium` | 中停顿 | 750 |
+| `.strong` | 强停顿 | 1000 |
+| `.x_strong` | 极强停顿 | 1250 |
+
+通过 `BreakLevel.allCases` 或 `BreakLevel.allLevels()` 枚举全部档位。
+
+## `RateLevel`
+| 值 | 名称 | rate |
+| --- | --- | --- |
+| `.slow` | 慢速 | -25 |
+| `.normal` | 正常 | 0 |
+| `.fast` | 快速 | 30 |
+| `.superFast` | 飞快 | 60 |
+
+`RateLevel.from(rate:)` 根据数值反查档位；同时保留 `RateLevel.level(_:)` 别名以兼容旧代码。
+
+# 单元测试
+```bash
+swift test
 ```
+共 48 个测试，覆盖：
+- `TTSConfig` Codable 往返、`wrappedRate` 边界
+- `RateLevel` 分档、`BreakLevel` 毫秒与 `CaseIterable`
+- `HLContent` 高亮文本与换行 / 空格计数（含 CRLF）
+- `MP3FileValidator` 文件头校验
+- `TTSContent.fullText` 拼接、`PlayState` 与 `isPlaying` 兼容
+- `TTSSpeakerDic` 稳定 id、字典查找
+
+# 兼容性说明
+- 本次重写不改变既有公开 API 的函数签名；旧字段名（如 `TTSContent.defautConfig()`、`RateLevel.level(_:)`）以别名形式保留
+- `SimpleDefaults` 是 `AmosBase` 提供的强类型键值库，本库已迁移默认配置存储
+- 微软 TTS 引擎仍依赖 `MicrosoftCognitiveServicesSpeech.xcframework` 与 `SimpleAESCrypto`（密钥从 `DoubaoEngine` 共享的两个常量派生），相关密钥不在本计划范围内

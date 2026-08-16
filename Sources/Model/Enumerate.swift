@@ -1,6 +1,6 @@
 //
 //  Enumerate.swift
-//  AmosVoice
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2024/4/3.
 //
@@ -22,10 +22,23 @@ public enum TTSEngine: Codable, Sendable {
     }
 }
 
+/// 一次合成 / 播放生命周期内的读取位置。
+public struct Reading: Sendable, Equatable {
+    public let word: String
+    public let offset: Int
+    public let length: Int
+
+    public init(word: String, offset: Int, length: Int) {
+        self.word = word
+        self.offset = offset
+        self.length = length
+    }
+}
+
 /// 播放的状态
 public enum PlayStatus: Sendable {
     case start, pause, stop
-    case play(reading: (word:String, offset:Int, length:Int))
+    case play(reading: Reading)
     case error(error: Error)
     
     public var name: String {
@@ -45,11 +58,9 @@ public enum PlayStatus: Sendable {
     
     public var isPlaying: Bool {
         switch self {
-        case .play:
+        case .play, .start, .pause:
             return true
-        case .start, .pause:
-            return true
-        default:
+        case .stop, .error:
             return false
         }
     }
@@ -79,14 +90,19 @@ public enum ContentType: Hashable, Codable, Sendable {
 }
 
 /// 停顿的类型
-public enum BreakLevel: String, Codable, Sendable {
+public enum BreakLevel: String, Codable, CaseIterable, Sendable {
     case x_weak
     case weak
     case medium
     case strong
     case x_strong
-    
-    public func name() -> String {
+
+    /// 与系统已有调用方保持兼容，等价于 `CaseIterable.allCases`。
+    public static func allLevels() -> [Self] {
+        Self.allCases
+    }
+
+    public var displayName: String {
         switch self {
         case .x_weak:
             return "极弱停顿"
@@ -100,8 +116,10 @@ public enum BreakLevel: String, Codable, Sendable {
             return "极强停顿"
         }
     }
-    
-    // 毫秒
+
+    public func name() -> String { displayName }
+
+    /// 毫秒
     public func pause() -> Int {
         switch self {
         case .x_weak:
@@ -116,18 +134,15 @@ public enum BreakLevel: String, Codable, Sendable {
             return 1250
         }
     }
-    
-    public static func allCases() -> [Self] {
-        [.x_weak, .weak, .medium, .strong, .x_strong]
-    }
 }
 
-public enum RateLevel: Sendable {
+public enum RateLevel: Sendable, CaseIterable {
     case slow, normal, fast, superFast
+
     public static var allLevel: [Self] {
         [.slow, .normal, .fast, .superFast]
     }
-    
+
     public var name: String {
         switch self {
         case .slow:
@@ -140,7 +155,7 @@ public enum RateLevel: Sendable {
             return "飞快"
         }
     }
-    
+
     public var rate: Double {
         switch self {
         case .slow:
@@ -153,17 +168,22 @@ public enum RateLevel: Sendable {
             return 60
         }
     }
-    
-    public static func level(_ rate: Double) -> Self {
+
+    public static func from(rate: Double) -> Self {
         if rate < 0 {
             return .slow
-        }else if rate < 10 {
+        } else if rate < 10 {
             return .normal
-        }else if rate < 40 {
+        } else if rate < 40 {
             return .fast
-        }else {
+        } else {
             return .superFast
         }
+    }
+
+    /// 兼容旧调用：`RateLevel.level(_:)`
+    public static func level(_ rate: Double) -> Self {
+        from(rate: rate)
     }
 }
 
@@ -171,8 +191,8 @@ public enum TTSGender: Int, Codable, Sendable {
     case female = 1
     case male = 2
     case girl = 3
-    
-    public func name() -> String {
+
+    public var displayName: String {
         switch self {
         case .female:
             return "女性"
@@ -182,8 +202,8 @@ public enum TTSGender: Int, Codable, Sendable {
             return "小女孩"
         }
     }
-    
-    public func color() -> Color {
+
+    public var color: Color {
         switch self {
         case .female:
             return .purple
@@ -193,4 +213,7 @@ public enum TTSGender: Int, Codable, Sendable {
             return .pink
         }
     }
+
+    /// 兼容旧版 `name()` / `color()` 调用方式。
+    public func name() -> String { displayName }
 }

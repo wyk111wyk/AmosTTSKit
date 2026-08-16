@@ -1,6 +1,6 @@
 //
-//  File.swift
-//  AmosTTS
+//  SystemTTSEngine.swift
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2024/9/20.
 //
@@ -10,95 +10,148 @@ import AVFAudio
 import AmosBase
 import SwiftUI
 
-extension AVSpeechSynthesizer: @unchecked @retroactive Sendable {}
+/// `AVSpeechSynthesizer` 不是线程安全的，但回调都在同一线程上（通常是 main）。
+/// 通过 `nonisolated(unsafe)` 让编译器不再追究，而不是 `@retroactive Sendable`。
+private nonisolated(unsafe) var _speechSynthesizerRetainer: Any? = nil
 
-class SystemTTSEngine: NSObject, @unchecked Sendable {
+/// 系统 TTS 引擎封装。所有可变状态由 `lock` 串行化；`AVSpeechSynthesizer` 的所有调用都在同一线程。
+final class SystemTTSEngine: NSObject, @unchecked Sendable {
     let systemSynthesizer = AVSpeechSynthesizer()
-    var speechCallBack: (PlayStatus) throws -> Void = {_ in}
-    
-    override init() {}
-    
-    /// 开始播放 / 停止播放
+    private let lock = NSLock()
+    private var _speechCallBack: (PlayStatus) -> Void = { _ in }
+    private var _hasFinishedCurrentSession: Bool = false
+    private var _currentSessionID: UUID = UUID()
+
+    private var speechCallBack: (PlayStatus) -> Void {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return _speechCallBack
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            _speechCallBack = newValue
+        }
+    }
+
+    private var hasFinishedCurrentSession: Bool {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return _hasFinishedCurrentSession
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            _hasFinishedCurrentSession = newValue
+        }
+    }
+
+    private var currentSessionID: UUID {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return _currentSessionID
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            _currentSessionID = newValue
+        }
+    }
+
+    override init() {
+        super.init()
+        // 维持系统合成器在生命周期内不被回收。
+        _speechSynthesizerRetainer = systemSynthesizer
+    }
+
+    /// 开始播放 / 停止播放。
+    /// 每次 `play` 都会重新分配 sessionID 与 delegate 闭包，避免上一次的回调影响本次。
     func play(
         for allContent: [TTSContent],
         defaultConfig: TTSConfig,
-        speechCallBack: @escaping (PlayStatus) throws -> Void
+        speechCallBack: @escaping (PlayStatus) -> Void
     ) {
         if systemSynthesizer.isSpeaking {
-            systemSynthesizer.stopSpeaking(at: .word)
-        }else {
-            debugPrint("系统TTS：开始播放")
-            
-            self.speechCallBack = speechCallBack
-            systemSynthesizer.delegate = self
-            
-            let allText: String = allContent.fullText
-            
-            
-            // Configure the utterance.
-            var baseRate: Float = 0.53
-            var language: String? = nil
-            
-            if let possibleLanguage = SimpleLanguage().detectLanguage(
-                for: allText
-            )?.rawValue, possibleLanguage.hasPrefix("en") {
-                language = possibleLanguage
-            }
-            
-            baseRate = defaultConfig.wrappedRate.toFloat
-            
-            let utterance = AVSpeechUtterance(string: allText)
-            utterance.rate = baseRate
-            utterance.postUtteranceDelay = 0.5
-            utterance.volume = 1.0
-            utterance.voice = AVSpeechSynthesisVoice(language: language)
-            
-            systemSynthesizer.speak(utterance)
+            systemSynthesizer.stopSpeaking(at: .immediate)
+            return
         }
+        debugPrint("系统TTS：开始播放")
+
+        let sessionID = UUID()
+        currentSessionID = sessionID
+        hasFinishedCurrentSession = false
+        self.speechCallBack = { [weak self] status in
+            guard let self else { return }
+            let matches: Bool = {
+                self.lock.lock(); defer { self.lock.unlock() }
+                return self._currentSessionID == sessionID
+            }()
+            guard matches else { return }
+            speechCallBack(status)
+        }
+        systemSynthesizer.delegate = self
+
+        let allText: String = allContent.fullText
+
+        var language: String? = nil
+        if let possibleLanguage = SimpleLanguage().detectLanguage(
+            for: allText
+        )?.rawValue, possibleLanguage.hasPrefix("en") {
+            language = possibleLanguage
+        } else {
+            language = "zh-CN"
+        }
+
+        let baseRate: Float = defaultConfig.wrappedRate.toFloat
+
+        let utterance = AVSpeechUtterance(string: allText)
+        utterance.rate = baseRate
+        utterance.postUtteranceDelay = 0.5
+        utterance.volume = 1.0
+        utterance.voice = AVSpeechSynthesisVoice(language: language)
+
+        systemSynthesizer.speak(utterance)
+    }
+
+    /// 当前会话是否仍在进行。
+    var isCurrentSessionActive: Bool {
+        !hasFinishedCurrentSession
     }
 }
 
 // 系统TTS委托代理
 extension SystemTTSEngine: AVSpeechSynthesizerDelegate {
-    // 开始播放
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         debugPrint("TTS - 开始播放")
-        try? self.speechCallBack(.start)
+        speechCallBack(.start)
     }
-    // 暂停播放
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
         debugPrint("TTS - 暂停播放")
-        try? self.speechCallBack(.pause)
+        speechCallBack(.pause)
     }
-    // 取消播放
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        guard !hasFinishedCurrentSession else { return }
+        hasFinishedCurrentSession = true
         debugPrint("TTS - 取消播放")
-        try? self.speechCallBack(.stop)
+        speechCallBack(.stop)
     }
-    // 停止播放
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        guard !hasFinishedCurrentSession else { return }
+        hasFinishedCurrentSession = true
         debugPrint("TTS - 停止播放")
-        try? self.speechCallBack(.stop)
+        speechCallBack(.stop)
     }
-    // 继续播放
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
         debugPrint("TTS - 继续播放")
     }
-    // 播放进度
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
         let fullText = utterance.speechString as NSString
         let subString = fullText.substring(with: characterRange)
-        try? self.speechCallBack(
+        speechCallBack(
             .play(
-                reading: (
-                    String(subString).firstCharacters(count: 8),
-                    characterRange.location,
-                    characterRange.length
+                reading: Reading(
+                    word: String(subString).firstCharacters(count: 8),
+                    offset: characterRange.location,
+                    length: characterRange.length
                 )
             )
         )
-        
-//        let resultText = String(subString)
-//        debugPrint("TTS - 播放: \(resultText) (\(characterRange.location), \(characterRange.length))")
     }
 }

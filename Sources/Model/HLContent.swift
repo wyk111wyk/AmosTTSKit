@@ -1,6 +1,6 @@
 //
 //  HLContent.swift
-//  AmosVoice
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2024/4/8.
 //
@@ -9,24 +9,30 @@ import Foundation
 import SwiftUI
 
 public struct HLContent {
+    @ObservationIgnored
     let isDebuging: Bool
-    
+
     public let fullText: String
     public let allContent: [TTSContent]
     public let engine: TTSEngine
-    
+
     public var textOffset: Int
     public var wordLength: Int
     public var playWord: String
-    
-    // 是否跳过回车（微软 TTS 需要跳过）
+
+    /// 是否跳过回车（微软 TTS 需要跳过，因为 SDK 在 SSML 中会规范化换行）
     public let isSkipReturn: Bool
-    
+
     public let fontSize: CGFloat
     public let rowSpace: CGFloat
-    
+
     public let isHighLightWord: Bool
-    
+
+    /// 缓存：换行/空格偏移表，仅在 `fullText` 变化时重建，避免 `highlightedText` O(n²) 重算。
+    /// 使用串行锁保护，跨线程安全。
+    @ObservationIgnored
+    private static let crlfCache = CachedTableStore()
+
     public init(
         isDebuging: Bool = false,
         allContent: [TTSContent],
@@ -50,51 +56,32 @@ public struct HLContent {
         self.rowSpace = rowSpace
         self.isHighLightWord = isHighLightWord
     }
-    
+
     public func highlightedText(
         options: String.CompareOptions = []
     ) -> AttributedString {
         if isHighLightWord {
             var offSet = textOffset
-            // MS引擎选字需要计算回车和空格的数量并跳过
             if isSkipReturn {
-                let returnCount = countNewLines(
-                    before: textOffset,
-                    in: fullText
-                )
-                if returnCount > 0 { offSet += (returnCount + 1) }
-                let spaceCount = countSpaces(
-                    before: textOffset,
-                    in: fullText
-                )
-                if spaceCount > 0 { offSet += spaceCount }
+                let table = Self.crlfTable(for: fullText)
+                let nlCount = table.countNewLines(before: offSet)
+                if nlCount > 0 { offSet += nlCount }
+                let spCount = table.countSpaces(before: offSet)
+                if spCount > 0 { offSet += spCount }
             }
-            // 计算高亮的起始位置和结束位置
-            let endIndex = fullText.endIndex
             let totalCount = fullText.count
-            let start = fullText.index(
-                fullText.startIndex,
-                offsetBy: min(offSet, totalCount),
-                limitedBy: endIndex
-            ) ?? endIndex
-            let end = fullText.index(
-                start,
-                offsetBy: min(wordLength, totalCount - offSet),
-                limitedBy: endIndex
-            ) ?? endIndex
-            
-            // 选择前的文字
+            let safeStart = min(offSet, totalCount)
+            let start = fullText.index(fullText.startIndex, offsetBy: safeStart, limitedBy: fullText.endIndex) ?? fullText.endIndex
+            let end = fullText.index(start, offsetBy: min(wordLength, totalCount - safeStart), limitedBy: fullText.endIndex) ?? fullText.endIndex
+
             let beforeText = String(fullText[..<start])
-            // 选择的文字
             let selectedText = String(fullText[start..<end])
-            // 选择后的文字
             let afterText = String(fullText[end...])
-            
-            // 转换为AttributedString
+
             var before = AttributedString(beforeText)
             var selected = AttributedString(selectedText)
             var after = AttributedString(afterText)
-            
+
             if isDebuging && (textOffset > 0 || wordLength > 0) {
                 debugPrint("- 高亮播放进度 -")
                 debugPrint("Total Text Count: \(fullText.count)")
@@ -103,79 +90,123 @@ public struct HLContent {
                 debugPrint("Select Word: \(selected)")
                 debugPrint("Play Word: \(playWord)")
             }
-            
-            // 设置文字显示的样式
-#if os(iOS)
-            before.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
-            selected.uiKit.backgroundColor = UIColor(Color.blue.opacity(0.3))
-            selected.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
-            after.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
-#elseif os(macOS)
-            before.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-            selected.appKit.backgroundColor = NSColor(Color.blue.opacity(0.3))
-            selected.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
-            after.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-#endif
-            
-            // 合并前后的文字
+
+            Self.applyStyle(before: &before, selected: &selected, after: &after, fontSize: fontSize)
+
             var attributedString = before + selected + after
 #if os(iOS)
             attributedString.uiKit.foregroundColor = .label
 #elseif os(macOS)
             attributedString.appKit.foregroundColor = .labelColor
 #endif
-            // 设置文字的行距
             let paragraphStyle = NSMutableParagraphStyle()
             paragraphStyle.lineSpacing = rowSpace
             attributedString.paragraphStyle = paragraphStyle
-            
             return attributedString
-        }else {
+        } else {
             var fullString = AttributedString(fullText)
-#if os(iOS)
-            fullString.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
-            fullString.uiKit.foregroundColor = .label
-#elseif os(macOS)
-            fullString.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
-            fullString.appKit.foregroundColor = .labelColor
-#endif
+            Self.applyPlainStyle(to: &fullString, fontSize: fontSize)
             let paragraphStyle = NSMutableParagraphStyle()
             paragraphStyle.lineSpacing = rowSpace
             fullString.paragraphStyle = paragraphStyle
             return fullString
         }
     }
-    
+
+    /// 统计字符串 `[0, before)` 区间内的换行数量（兼容 CRLF / LF）。
     public func countNewLines(before textOffset: Int, in fullText: String) -> Int {
-        // 首先检查textOffset是否在字符串的有效范围内
-        guard textOffset >= 0 && textOffset <= fullText.count else {
-            return 0
-        }
-
-        // 获取到textOffset位置之前的子字符串
-        let index = fullText.index(fullText.startIndex, offsetBy: textOffset)
-        let substring = fullText[..<index]
-
-        // 计算子字符串中回车符的数量
-        let newLinesCount = substring.filter { $0 == "\n" }.count
-
-        return newLinesCount
+        Self.crlfTable(for: fullText).countNewLines(before: textOffset)
     }
-    
+
+    /// 统计字符串 `[0, before)` 区间内的 ASCII 空格数量。
     public func countSpaces(before textOffset: Int, in fullText: String) -> Int {
-        // 首先检查textOffset是否在字符串的有效范围内
-        guard textOffset >= 0 && textOffset <= fullText.count else {
-            return 0
+        Self.crlfTable(for: fullText).countSpaces(before: textOffset)
+    }
+
+    // MARK: - Helpers
+
+    private static func crlfTable(for text: String) -> CRLineBreakTable {
+        crlfCache.table(for: text)
+    }
+
+    private static func applyStyle(
+        before: inout AttributedString,
+        selected: inout AttributedString,
+        after: inout AttributedString,
+        fontSize: CGFloat
+    ) {
+#if os(iOS)
+        before.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
+        selected.uiKit.backgroundColor = UIColor(Color.blue.opacity(0.3))
+        selected.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+        after.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
+#elseif os(macOS)
+        before.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+        selected.appKit.backgroundColor = NSColor(Color.blue.opacity(0.3))
+        selected.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+        after.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+#endif
+    }
+
+    private static func applyPlainStyle(to string: inout AttributedString, fontSize: CGFloat) {
+#if os(iOS)
+        string.uiKit.font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
+        string.uiKit.foregroundColor = .label
+#elseif os(macOS)
+        string.appKit.font = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+        string.appKit.foregroundColor = .labelColor
+#endif
+    }
+}
+
+/// 字符串中的换行/空格前缀和表。
+struct CRLineBreakTable {
+    private let newLinesBefore: [Int]
+    private let spacesBefore: [Int]
+
+    init(text: String) {
+        let scalars = Array(text.unicodeScalars)
+        var newLines: [Int] = []
+        var spaces: [Int] = []
+        newLines.reserveCapacity(scalars.count + 1)
+        spaces.reserveCapacity(scalars.count + 1)
+        newLines.append(0)
+        spaces.append(0)
+        var nl = 0
+        var sp = 0
+        var index = 0
+        while index < scalars.count {
+            let scalar = scalars[index]
+            if scalar == "\n" {
+                nl += 1
+            } else if scalar == "\r" {
+                if index + 1 < scalars.count, scalars[index + 1] == "\n" {
+                    nl += 2
+                    index += 1
+                } else {
+                    nl += 1
+                }
+            } else if scalar == " " {
+                sp += 1
+            }
+            newLines.append(nl)
+            spaces.append(sp)
+            index += 1
         }
+        self.newLinesBefore = newLines
+        self.spacesBefore = spaces
+    }
 
-        // 获取到textOffset位置之前的子字符串
-        let index = fullText.index(fullText.startIndex, offsetBy: textOffset)
-        let substring = fullText[..<index]
+    /// 字符串 `[0, before)` 区间内的换行数量。LF 算 1，CRLF 算 2，CR 单独算 1。
+    func countNewLines(before: Int) -> Int {
+        guard before >= 0, before < newLinesBefore.count else { return 0 }
+        return newLinesBefore[before]
+    }
 
-        // 计算子字符串中回车符的数量
-        let newLinesCount = substring.filter { $0 == " " }.count
-
-        return newLinesCount
+    /// 字符串 `[0, before)` 区间内的 ASCII 空格数量。
+    func countSpaces(before: Int) -> Int {
+        guard before >= 0, before < spacesBefore.count else { return 0 }
+        return spacesBefore[before]
     }
 }
 
@@ -192,7 +223,7 @@ extension HLContent: Codable {
         case rowSpace
         case isHighLightWord
     }
-    
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         fullText = try container.decode(String.self, forKey: .fullText)
@@ -205,11 +236,11 @@ extension HLContent: Codable {
         fontSize = try container.decode(CGFloat.self, forKey: .fontSize)
         rowSpace = try container.decode(CGFloat.self, forKey: .rowSpace)
         isHighLightWord = try container.decode(Bool.self, forKey: .isHighLightWord)
-        
-        // 以下属性不参与编码储存
+
+        // 调试态是运行时状态，不参与持久化
         isDebuging = false
     }
-    
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(fullText, forKey: .fullText)
@@ -222,5 +253,25 @@ extension HLContent: Codable {
         try container.encode(fontSize, forKey: .fontSize)
         try container.encode(rowSpace, forKey: .rowSpace)
         try container.encode(isHighLightWord, forKey: .isHighLightWord)
+    }
+}
+
+/// 字符串 → 换行/空格前缀和表的线程安全缓存。
+final class CachedTableStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: CRLineBreakTable] = [:]
+
+    func table(for text: String) -> CRLineBreakTable {
+        lock.lock()
+        if let cached = storage[text] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+        let table = CRLineBreakTable(text: text)
+        lock.lock()
+        storage[text] = table
+        lock.unlock()
+        return table
     }
 }

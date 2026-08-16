@@ -1,6 +1,6 @@
 //
-//  SwiftUIView.swift
-//  AmosTTS
+//  DefaultSpeakerCell.swift
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2024/9/20.
 //
@@ -9,34 +9,25 @@ import SwiftUI
 import AmosBase
 
 public struct DefaultSpeakerCell: View {
-    @AppStorage("DefaultConfig") private var savedDefaultConfig: Data?
-    
     @Bindable var ttsManager: TTSManager
-    
-    var defaultConfig: TTSConfig {
-        if let savedConfig = savedDefaultConfig?.decode(type: TTSConfig.self) {
-            savedConfig
-        } else {
-            TTSConfig()
-        }
-    }
-    
+
     public init(ttsManager: TTSManager) {
         self.ttsManager = ttsManager
     }
-    
+
     public var body: some View {
+        let config = ttsManager.defaultConfig
         NavigationLink {
             ConfigSetting(
                 ttsManager: ttsManager,
-                config: defaultConfig
+                config: config
             ) { newConfig in
                 // 保存默认全局播放属性
-                savedDefaultConfig = newConfig?.toData()
+                ttsManager.saveDefaultConfig(newConfig)
             }
         } label: {
             SimpleCell("默认播放属性") {
-                Text(defaultConfig.speaker.speakerName)
+                Text(config.speaker.speakerName)
                     .simpleTag(.border())
             }
         }

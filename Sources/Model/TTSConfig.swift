@@ -1,6 +1,6 @@
 //
 //  TTSConfig.swift
-//  AmosVoice
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2023/4/6.
 //
@@ -13,12 +13,12 @@ public struct TTSConfig: Codable, Identifiable, Sendable {
     public var role: TTSRole?
     public var style: TTSStyle?
     public var styledegree: Double = 1 // 0.01 到 2
-    // 语速
-    public var rate: Double = 0 // -50% - 200%
-    // 语气
-    public var pitch: Double = 0 // 50% - 150%
-    // 音量
-    public var volume: Double = 100 // 0% - 100%
+    /// 语速，范围 -50 ~ 200（百分比偏移）
+    public var rate: Double = 0
+    /// 音调，范围 -50 ~ 50（百分比偏移）
+    public var pitch: Double = 0
+    /// 音量，范围 0 ~ 100（百分比）
+    public var volume: Double = 100
 
     public init(
         id: UUID = .init(),
@@ -39,25 +39,27 @@ public struct TTSConfig: Codable, Identifiable, Sendable {
         self.pitch = pitch
         self.volume = volume
     }
-    
+
     public init(speakingVoice: String?) {
         let speaker = TTSSpeaker.speaker(from: speakingVoice)
         self.init(
             speaker: speaker ?? .systemTTSEngine
         )
     }
-    
-    /// 系统引擎的速度 0 - 1
+
+    /// 系统引擎的语速（0 ~ 1）。将 TTSConfig 的 -50 ~ 200 偏移映射到 AVSpeechUtterance 接受的范围。
+    /// - rate > 0: 0.55 ~ 1.0
+    /// - rate <= 0: 0 ~ 0.55
     public var wrappedRate: Double {
         if speaker == .systemTTSEngine {
             if rate > 0 {
-                // 0.55 - 1.0
-                return 1 - (200 - rate) / 200 * 0.45
-            }else {
-                // 0 - 0.55
-                return (rate + 50) / 50 * 0.55
+                let clamped = min(rate, 200)
+                return 1 - (200 - clamped) / 200 * 0.45
+            } else {
+                let clamped = max(rate, -50)
+                return (clamped + 50) / 50 * 0.55
             }
-        }else {
+        } else {
             return rate
         }
     }
@@ -67,12 +69,11 @@ extension TTSConfig {
     public static var system: TTSConfig {
         TTSConfig(speaker: .systemTTSEngine, rate: -9)
     }
-    
+
     public static var poem: TTSConfig {
         TTSConfig(speaker: .xiaoxiao, style: .poemStyle)
     }
-    
-    // zh-CN-XiaoxiaoNeural
+
     public var tagName: String {
         speaker.audioName
     }
@@ -83,6 +84,9 @@ extension TTSConfig: Equatable {
         lhs.speaker == rhs.speaker &&
         lhs.role == rhs.role &&
         lhs.style == rhs.style &&
-        lhs.rate == rhs.rate
+        lhs.rate == rhs.rate &&
+        lhs.pitch == rhs.pitch &&
+        lhs.volume == rhs.volume &&
+        lhs.styledegree == rhs.styledegree
     }
 }
