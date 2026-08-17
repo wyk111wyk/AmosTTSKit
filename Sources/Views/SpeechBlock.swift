@@ -1,6 +1,6 @@
 //
-//  SpeakBlock.swift
-//  AmosVoice
+//  SpeechBlock.swift
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2024/4/3.
 //
@@ -11,10 +11,10 @@ import AmosBase
 public struct SpeechBlock: View {
     @Bindable var ttsManager: TTSManager
     @Binding var content: TTSContent
-    
+
     @FocusState var focused: Bool
     let isFocused: Bool
-    
+
     public init(
         ttsManager: TTSManager,
         isFocused: Bool = false,
@@ -24,7 +24,7 @@ public struct SpeechBlock: View {
         self.isFocused = isFocused
         self._content = content
     }
-    
+
     public var body: some View {
         switch content.type {
         case .text:
@@ -35,15 +35,15 @@ public struct SpeechBlock: View {
         case .pause(_):
             Group {
                 Picker("停顿", selection: $content.type) {
-                    ForEach(BreakLevel.allCases(), id: \.self) { level in
-                        Text("\(level.name()): \(level.pause())毫秒")
+                    ForEach(BreakLevel.allCases, id: \.self) { level in
+                        Text("\(level.displayName): \(level.pause())毫秒")
                             .tag(ContentType.pause(level: level))
                     }
                 }
             }
         }
     }
-    
+
     private func textFieldCell() -> some View {
         SimpleTextField(
             $content.speechText,
@@ -54,7 +54,7 @@ public struct SpeechBlock: View {
             focused = isFocused
         }
     }
-    
+
     private func customizedCell() -> some View {
         NavigationLink {
             ConfigSetting(

@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "AmosTTS",
+    name: "AmosTTSKit",
     defaultLocalization: "en",
     platforms: [
         .iOS(.v17),
@@ -13,17 +13,18 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "AmosTTS",
-            targets: ["AmosTTS"]),
+            name: "AmosTTSKit",
+            targets: ["AmosTTSKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/wyk111wyk/AmosBase.git", branch: "main")
     ],
     targets: [
         .target(
-            name: "AmosTTS",
+            name: "AmosTTSKit",
             dependencies: ["AmosBase", "MSTTSFramework"],
             path: "Sources",
+            exclude: ["Frameworks"],
             resources: [
                 .process("Resources")
             ]
@@ -31,6 +32,11 @@ let package = Package(
         .binaryTarget(
             name: "MSTTSFramework",
             path: "./Sources/Frameworks/MicrosoftCognitiveServicesSpeech.xcframework"
+        ),
+        .testTarget(
+            name: "AmosTTSKitTests",
+            dependencies: ["AmosTTSKit"],
+            path: "Tests/AmosTTSKitTests"
         )
     ]
 )

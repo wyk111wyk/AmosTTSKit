@@ -1,6 +1,6 @@
 //
 //  SpeakerPicker.swift
-//  AmosVoice
+//  AmosTTSKit
 //
 //  Created by AmosFitness on 2023/4/6.
 //
@@ -13,15 +13,18 @@ struct SpeakerPicker: View {
     enum PickerType {
         case all, onlyMS
     }
-    
+
     @Environment(\.dismiss) private var dismissPage
-    
-    @State private var allLanguages: [TTSSpeakerDic]
+
+    private let allLanguages: [TTSSpeakerDic]
+    /// 各语言分类的展开状态。拆出 struct，避免 struct 元素上的 `var` 在视图重建时被覆盖。
+    @State private var expansionStates: [String: Bool]
+
     @State var selectedSpeaker: TTSSpeaker
-    
+
     @Bindable var ttsManager: TTSManager
     let saveAction: (TTSSpeaker) -> Void
-    
+
     init(
         ttsManager: TTSManager,
         type: PickerType = .onlyMS,
@@ -29,21 +32,30 @@ struct SpeakerPicker: View {
         saveAction: @escaping (TTSSpeaker) -> Void
     ) {
         self.ttsManager = ttsManager
+        let langs: [TTSSpeakerDic]
         switch type {
         case .all:
-            self._allLanguages = State(initialValue: TTSSpeakerDic.allLanguages)
+            langs = TTSSpeakerDic.allLanguages
         case .onlyMS:
-            self._allLanguages = State(initialValue: TTSSpeakerDic.onlyMSLanguages)
+            langs = TTSSpeakerDic.onlyMSLanguages
         }
+        self.allLanguages = langs
+        self._expansionStates = State(initialValue: Dictionary(
+            uniqueKeysWithValues: langs.map { ($0.language.rawValue, true) }
+        ))
         self._selectedSpeaker = State(initialValue: selectedSpeaker)
         self.saveAction = saveAction
     }
-    
+
     var body: some View {
         Form {
-            ForEach($allLanguages) { $lang in
+            ForEach(allLanguages) { lang in
                 Section {
-                    DisclosureGroup(isExpanded: $lang.isExpanded) {
+                    let isExpanded = Binding<Bool>(
+                        get: { expansionStates[lang.language.rawValue] ?? true },
+                        set: { expansionStates[lang.language.rawValue] = $0 }
+                    )
+                    DisclosureGroup(isExpanded: isExpanded) {
                         ForEach(lang.speakers) { speaker in
                             Button {
                                 selectedSpeaker = speaker
@@ -95,17 +107,17 @@ extension SpeakerPicker {
                     Text(speaker.speakerName)
                         .foregroundStyle(.secondary)
                 }
-                
-                Text(speaker.gender.name())
-                    .simpleTag(.full(verticalPad: 1.5, horizontalPad: 5, cornerRadius: 3, bgColor: speaker.gender.color()))
+
+                Text(speaker.gender.displayName)
+                    .simpleTag(.full(verticalPad: 1.5, horizontalPad: 5, cornerRadius: 3, bgColor: speaker.gender.color))
                 .opacity(hasSelect(speaker) ? 1 : 0.5)
-                
+
                 Text(speaker.sublanguage)
                     .font(.footnote)
                     .foregroundColor(.secondary)
-                
+
                 Spacer()
-                
+
                 Button {
                     playSpeaker(for: speaker)
                 } label: {
@@ -119,13 +131,13 @@ extension SpeakerPicker {
                 }
                 .foregroundColor(.blue)
             }
-            
+
             if !speaker.speakerIntro.isEmpty {
                 Text(speaker.speakerIntro)
                     .font(.footnote)
                     .foregroundStyle(hasSelect(speaker) ? .primary : .secondary)
             }
-            
+
             if !speaker.style.isEmpty || !speaker.role.isEmpty {
                 VStack(spacing: 8) {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -175,7 +187,7 @@ extension SpeakerPicker {
         }
         .foregroundColor(.primary)
     }
-    
+
     private func hasSelect(_ speaker: TTSSpeaker) -> Bool {
         selectedSpeaker == speaker
     }
