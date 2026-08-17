@@ -7,3 +7,25 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 Package.resolved
+
+
+# >>> AI & runtime ignore (Amos default) >>>
+# AI 工具文档（zcode / workbuddy 等）
+.zcode/
+.workbuddy/
+workbuddy/
+.codebuddy/
+.cline/
+.cursor/
+.aider/
+.gemini/
+
+# 运行时 / 构建产物（含测试构建）
+build/
+DerivedData/
+.build/
+Pods/
+node_modules/
+.next/
+.output/
+dist/
