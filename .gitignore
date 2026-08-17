@@ -29,3 +29,22 @@ node_modules/
 .next/
 .output/
 dist/
+
+
+# >>> Xcode / IDE 用户状态（Amos default） >>>
+# Xcode 用户设置（不追踪）
+xcuserdata/
+*.xccheckout
+*.xcscmblueprint
+*.xcuserstate
+*.xcbkptlist
+# 兼容性与旧文件
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+*.mode1v3
+*.mode2v3
+# 构建中间产物
+*.hmap
+# macOS 系统文件
+.DS_Store
